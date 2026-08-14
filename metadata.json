@@ -1,0 +1,6 @@
+{
+  "name": "FoodVisionNet",
+  "description": "AI-Powered Food Quality Assessment & Contamination Detection System using YOLOv12 and EfficientNetV2 deep learning architecture.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
