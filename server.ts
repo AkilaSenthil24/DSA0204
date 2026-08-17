@@ -71,26 +71,37 @@ async function startServer() {
 
       if (ai) {
         try {
-          const prompt = `You are the expert food quality and safety vision engine for FoodVisionNet (combining YOLOv12 object/defect localization and EfficientNetV2 freshness classification).
+          const prompt = `You are the expert food quality and safety vision engine for FoodVisionNet (combining YOLOv12 object & defect localization with EfficientNetV2 freshness classification).
 
-CRITICAL FOOD INSPECTION GUIDELINES:
-Examine the image with rigorous scientific precision. Look for:
-1. Tissue Integrity: Is the food intact or is it bitten, half-eaten, cracked, gouged, bruised, or damaged?
-2. Spoilage & Decay: Check for brown/black tissue oxidation, browning of exposed flesh (e.g. bitten apple or fruit turning brown/mushy), soft rot, necrotic spots, mold mycelium (white/green/black fuzz), bacterial slime, shriveling, or fungal spores.
-3. Foreign Contamination: Check for insects, plastic, glass, hair, metal, foreign debris, or chemical residues.
+FOOD QUALITY & INSPECTION PROTOCOL:
+Examine the uploaded image with high scientific precision:
+1. Item Identification:
+   - Identify the exact food item (e.g., "Bananas", "Apple", "Tomato", "Strawberry", "Bread Loaf", "Raw Chicken", "Beef Cut", "Lettuce").
 
-CLASSIFICATION RULES:
-- If a fruit or food is bitten into, has exposed oxidized/decayed/brown pulp, visible mold, soft rot, or tissue breakdown, it is NEVER "Fresh". You MUST classify it as "Spoiled" (or "Contaminated" if foreign physical matter or severe pathogens are present).
-- Quality score for spoiled/damaged food must be low (e.g., 10 to 45).
-- EfficientNet probabilities must reflect this: spoiledProbability >= 0.80, freshProbability <= 0.15.
-- Add YOLOv12 bounding boxes specifically over:
-  a) The primary food item(s) (category: "food_item", label e.g., "Apple (Damaged / Decayed)")
-  b) The specific defect / bite / rot / mold / oxidation regions (category: "defect", label e.g. "Bite Damage & Pulp Oxidation", "Necrotic Rot Patch", "Mold Spores", severity: "high" or "critical").
+2. Spoilage, Overripeness & Tissue Degradation Analysis:
+   - BANANAS & FRUITS: Check skin and flesh. If banana peels are heavily blackened, covered in dark brown/black patches (>25% coverage), shriveled, bruised, moldy, or overripe/decayed -> CLASSIFY AS "Spoiled". Quality score 15-35.
+   - APPLES & HARD FRUITS: Check for bite marks, missing chunks, browning pulp, rotten cavities, fungal mold, bruising -> CLASSIFY AS "Spoiled". Quality score 10-35.
+   - VEGETABLES / LEAFY GREENS: Check for yellowing, slime, wilting, dark rotten spots -> CLASSIFY AS "Spoiled".
+   - MEATS / SEAFOOD: Check for graying, greenish discoloration, surface slime, drying -> CLASSIFY AS "Spoiled" or "Contaminated".
+   - BREAD / BAKERY: Check for white, green, or black mold spores -> CLASSIFY AS "Spoiled".
+   - INTACT / FRESH: Only classify as "Fresh" if the food has vibrant natural color, smooth intact skin, zero rot, zero severe browning/blackening, zero bite marks, and optimal firmness.
 
-Output strictly valid JSON according to the schema.`;
+3. Foreign Contamination Check:
+   - Check for foreign objects (insects, plastic, metal, glass, hair, chemical sheen) -> CLASSIFY AS "Contaminated". Quality score 0-20.
+
+4. EfficientNetV2 Probabilities:
+   - If Spoiled: spoiledProbability >= 0.85, freshProbability <= 0.10, contaminatedProbability <= 0.05.
+   - If Fresh: freshProbability >= 0.88, spoiledProbability <= 0.08, contaminatedProbability <= 0.04.
+   - If Contaminated: contaminatedProbability >= 0.75, spoiledProbability <= 0.20, freshProbability <= 0.05.
+
+5. YOLOv12 Bounding Box Localization (coordinates [ymin, xmin, ymax, xmax] in 0 to 1000):
+   - Box 1: Primary food item boundary (category: "food_item", label: e.g. "Overripe / Spoiled Bananas" or "Fresh Bananas").
+   - Box 2+: Localized defect / rot / browning / mold / bite areas (category: "defect", label: e.g. "Peel Senescence & Browning", "Bite Defect & Pulp Oxidation", "Rot Spot", severity: "high" or "critical").
+
+Output strictly valid JSON complying with the schema.`;
 
           const response = await ai.models.generateContent({
-            model: "gemini-3.7-flash",
+            model: "gemini-2.5-flash",
             contents: {
               parts: [
                 {
@@ -208,7 +219,7 @@ Output strictly valid JSON according to the schema.`;
               inputResolution: "640x640x3",
               iouThreshold,
               confidenceThreshold,
-              engine: "Gemini 3.7 Vision & Dual-Pipeline Engine",
+              engine: "Gemini 2.5 Vision & Dual-Pipeline Engine",
             },
           });
         } catch (genError) {
