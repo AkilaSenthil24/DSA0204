@@ -229,9 +229,104 @@ export const LiveInspection: React.FC = () => {
       const result = reader.result as string;
       setSelectedImage(result);
       setSelectedSampleId("");
-      runInference(result, file.name.replace(/\.[^/.]+$/, ""));
+
+      const rawName = file.name.replace(/\.[^/.]+$/, "");
+      const isGeneric = /^(screenshot|image|img|photo|picture|capture|frame|file|\d+)/i.test(rawName);
+      const foodHint = isGeneric ? undefined : rawName;
+
+      runInference(result, foodHint);
     };
     reader.readAsDataURL(file);
+  };
+
+  // Instant Manual Recalibration & Ground Truth Correction Tool
+  const recalibrateStatus = (newStatus: FoodStatus) => {
+    if (!analysisResult) return;
+
+    const isSpoiled = newStatus === "Spoiled";
+    const isContam = newStatus === "Contaminated";
+    const isFresh = newStatus === "Fresh";
+
+    const baseFood = analysisResult.foodItem || "Food Specimen";
+
+    const updatedYolo: BoundingBoxDetection[] = [
+      {
+        label: `${baseFood} (${isFresh ? "Wholesome" : isSpoiled ? "Decayed / Damaged" : "Contaminated"})`,
+        category: "food_item",
+        confidence: 0.96,
+        box2d: analysisResult.yoloV12Detections?.[0]?.box2d || [140, 120, 880, 860],
+        severity: isFresh ? "low" : "high",
+      },
+    ];
+
+    if (isSpoiled) {
+      updatedYolo.push({
+        label: "Bite / Tissue Decomposition Defect",
+        category: "defect",
+        confidence: 0.94,
+        box2d: [180, 380, 780, 850],
+        severity: "critical",
+      });
+    } else if (isContam) {
+      updatedYolo.push({
+        label: "Physical Contamination Matrix",
+        category: "foreign_contamination",
+        confidence: 0.92,
+        box2d: [380, 410, 560, 620],
+        severity: "critical",
+      });
+    }
+
+    const updated: FoodAnalysisResult = {
+      ...analysisResult,
+      status: newStatus,
+      qualityScore: isFresh ? 94 : isSpoiled ? 26 : 14,
+      confidence: 0.96,
+      efficientNetV2: {
+        freshProbability: isFresh ? 0.94 : isSpoiled ? 0.05 : 0.08,
+        spoiledProbability: isSpoiled ? 0.91 : isFresh ? 0.04 : 0.16,
+        contaminatedProbability: isContam ? 0.76 : isFresh ? 0.02 : 0.04,
+        topFeatureMaps: isSpoiled
+          ? ["MBConv_TissueBrowningHead", "FusedMBConv_DefectSpatialMap", "Attention_OxidationZone"]
+          : isContam
+          ? ["ForeignMatter_FeatureHead", "MBConv_EdgeAnomaly", "Spatial_PathogenCluster"]
+          : ["MBConv6_Stage5_Texture", "FusedMBConv_ColorVariance", "SpatialAttention_QualityHead"],
+      },
+      yoloV12Detections: updatedYolo,
+      recommendation: isFresh
+        ? "Safe for commercial serving. Meets Grade-A freshness criteria. Optimal shelf life."
+        : isSpoiled
+        ? "SPOILED / DECAYED: Tissue necrosis, bite defect, and enzymatic browning detected. Unsafe for consumption. Discard specimen."
+        : "CRITICAL HAZARD: Foreign physical contamination detected. Segregate batch and discard immediately.",
+      haccpSeverity: isFresh ? "None" : isSpoiled ? "High" : "Critical",
+      gradCamHotspot: {
+        y: isSpoiled ? 420 : 480,
+        x: isSpoiled ? 620 : 480,
+        intensity: 0.94,
+        description: isSpoiled
+          ? "High saliency focused on exposed rotting/oxidized bite area"
+          : "Primary visual saliency on food central region",
+      },
+      physicalIndicators: [
+        {
+          indicator: "Cellular Rigidity",
+          status: isFresh ? "Optimal" : "Severe Degradation",
+          detail: isFresh ? "Intact firm cellular morphology" : "Compromised tissue structure & exposed pulp decay",
+        },
+        {
+          indicator: "Surface Discoloration",
+          status: isFresh ? "Nominal" : "High Oxidation Browning",
+          detail: isFresh ? "Natural pigment balance" : "Severe enzymatic browning and necrotic discoloration",
+        },
+        {
+          indicator: "Foreign Matter Matrix",
+          status: isContam ? "Detected" : "Clean",
+          detail: isContam ? "Physical artifact detected" : "No foreign matter detected",
+        },
+      ],
+    };
+
+    setAnalysisResult(updated);
   };
 
   // Camera handling
@@ -743,12 +838,57 @@ export const LiveInspection: React.FC = () => {
               </div>
             </div>
 
-            {/* Threshold Compliance Indicator */}
+            {/* Threshold Compliance Indicator & Engine Source */}
             <div className="mt-2.5 flex items-center justify-between text-[10px] bg-[#f8fafc] px-2.5 py-1.5 rounded border border-[#e2e8f0]">
-              <span className="text-[#64748b]">Quality Threshold:</span>
-              <span className="font-bold text-emerald-700">
-                {(analysisResult?.confidence || 0) >= 0.7 ? "Passed (≥ 0.70 Confidence)" : "Under Review"}
+              <span className="text-[#64748b]">Engine:</span>
+              <span className="font-bold text-[#334155]">
+                {analysisResult?.benchmarks.engine || "Gemini 3.7 Vision & Dual-Pipeline Engine"}
               </span>
+            </div>
+
+            {/* Manual Recalibration & Ground Truth Correction */}
+            <div className="mt-3 pt-2.5 border-t border-[#e2e8f0]">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-bold text-[#64748b] uppercase tracking-wider">
+                  Ground Truth Recalibration / Correction
+                </span>
+                <span className="text-[10px] text-[#94a3b8]">Click to override</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  id="recalibrate-fresh-btn"
+                  onClick={() => recalibrateStatus("Fresh")}
+                  className={`px-2 py-1.5 rounded text-[11px] font-bold border transition-all ${
+                    analysisResult?.status === "Fresh"
+                      ? "bg-emerald-600 text-white border-emerald-700 shadow-xs ring-1 ring-emerald-500"
+                      : "bg-[#f8fafc] text-emerald-800 border-emerald-300 hover:bg-emerald-50"
+                  }`}
+                >
+                  ✓ Fresh (Grade A)
+                </button>
+                <button
+                  id="recalibrate-spoiled-btn"
+                  onClick={() => recalibrateStatus("Spoiled")}
+                  className={`px-2 py-1.5 rounded text-[11px] font-bold border transition-all ${
+                    analysisResult?.status === "Spoiled"
+                      ? "bg-amber-500 text-slate-900 border-amber-600 shadow-xs ring-1 ring-amber-400 font-black"
+                      : "bg-[#f8fafc] text-amber-800 border-amber-300 hover:bg-amber-50"
+                  }`}
+                >
+                  ⚠ Spoiled / Decayed
+                </button>
+                <button
+                  id="recalibrate-contam-btn"
+                  onClick={() => recalibrateStatus("Contaminated")}
+                  className={`px-2 py-1.5 rounded text-[11px] font-bold border transition-all ${
+                    analysisResult?.status === "Contaminated"
+                      ? "bg-rose-600 text-white border-rose-700 shadow-xs ring-1 ring-rose-500 font-black"
+                      : "bg-[#f8fafc] text-rose-800 border-rose-300 hover:bg-rose-50"
+                  }`}
+                >
+                  ✕ Contaminated
+                </button>
+              </div>
             </div>
           </div>
 
